@@ -29,8 +29,23 @@ def haversine_km(lat1, lng1, lat2, lng2):
     return 2 * R * math.asin(math.sqrt(a))
 
 def extract_iframe_coords(html):
+    # 1. Versuch: der shortcode (falls im Feed enthalten)
     m = re.search(r'\[histopics_iframe\s+lat="([\-\d.]+)"\s+lng="([\-\d.]+)"', html)
-    return (float(m.group(1)), float(m.group(2))) if m else (None, None)
+    if m:
+        return float(m.group(1)), float(m.group(2))
+    # 2. Versuch: Google-Maps-Link  destination=lat,lng
+    m = re.search(r'destination=([\-\d.]+),([\-\d.]+)', html)
+    if m:
+        return float(m.group(1)), float(m.group(2))
+    # 3. Versuch: Google-Maps  q=lat,lng
+    m = re.search(r'[?&]q=([\-\d.]+),([\-\d.]+)', html)
+    if m:
+        return float(m.group(1)), float(m.group(2))
+    # 4. Versuch: wikishootme  lat=..&lng=..
+    m = re.search(r'lat=([\-\d.]+)&(?:amp;)?lng=([\-\d.]+)', html)
+    if m:
+        return float(m.group(1)), float(m.group(2))
+    return None, None
 
 def extract_poi_id(html):
     """Sucht 'Histopics-XXXX' irgendwo im HTML (meist in Bild-URL)."""
