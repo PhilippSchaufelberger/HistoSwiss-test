@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <title>HistoSwiss TEST – Karte</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet.markercluster@1.5.3/dist/MarkerCluster.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css">
+    <style>
+        html, body { height: 100%; margin: 0; }
+        #map { height: 100vh; margin: 0; }
+        .histoswiss-legende {
+            background: white;
+            padding: 8px 12px;
+            border-radius: 6px;
+            box-shadow: 0 1px 5px rgba(0,0,0,.3);
+            font: 13px sans-serif;
+        }
+        .histoswiss-legende .farbe {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            margin-right: 6px;
+            vertical-align: middle;
+            border: 1px solid #333;
+        }
+    </style>
+</head>
+<body>
+<div id="map"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
+
+<script>
+    // ============================================================
+    // 0. Überkategorien und Farben
+    // ============================================================
+    const UEBERKATEGORIEN = [
+        { key: 'peaks',  label: 'HistoSwiss Peaks', farbe: '#006400' },
+        { key: 'pics',   label: 'Histopics',        farbe: '#e6194b' },
+        { key: 'schutz', label: 'Schutzobjekte',    farbe: '#4363d8' }
+    ];
+    const FALLBACK_FARBE = '#888888';
+
+    function ueberkategorie(kategorie) {
+        if (!kategorie) return null;
+        const k = kategorie.toString().trim();
+        if (k === '') return null;
+        const ku = k.toUpperCase();
+        if (ku.indexOf('HSP') === 0) return 'peaks';
+        if (ku.indexOf('HISTOPICS') === 0) return 'pics';
+        return 'schutz';
+    }
+
+    function farbeFuerKategorie(kategorie) {
+        const key = ueberkategorie(kategorie);
+        if (!key) return FALLBACK_FARBE;
+        const found = UEBERKATEGORIEN.find(u => u.key === key);
+        return found ? found.farbe : FALLBACK_FARBE;
+    }
+
+    function labelFuerKategorie(kategorie) {
+        const key = ueberkategorie(kategorie);
+        if (!key) return 'Unbekannt';
+        const found = UEBERKATEGORIEN.find(u => u.key === key);
+        return found ? found.label : 'Unbekannt';
+    }
+
+    // ============================================================
+    // 1. URL-Parameter auslesen
+    // ============================================================
+    const urlParams = new URLSearchParams(window.location.search);
+    const startLat = parseFloat(urlParams.get('lat'));
+    const startLng = parseFloat(urlParams.get('lng'));
+    const startZoom = parseInt(urlParams.get('z')) || 8;
+
+    let initialLat = 46.8182;
+    let initialLng = 8.2275;
+    let initialZoom = 8;
+
+    if (!isNaN(startLat) && !isNaN(startLng)) {
+        initialLat = startLat;
+        initialLng = startLng;
+        initialZoom = isNaN(startZoom) ? 15 : startZoom;
+    }
+
+    // ============================================================
+    // 2. Karte initialisieren
+    // ============================================================
+    const map = L.map('map').setView([initialLat, initialLng], initialZoom);
+
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '© OpenStreetMap'
+    }).addTo(map);
+
+    // ============================================================
+    // 3. Marker-Cluster und GeoJSON laden
+    //    -> Testdatenquelle: HistoSwiss-test/test-all.geojson
+    // ============================================================
+    const markers = L.markerClusterGroup({
+        chunkedLoading: true,
+        maxClusterRadius: 80
+    });
+
+    const geojsonUrl = 'https://raw.githubusercontent.com/PhilippSchaufelberger/HistoSwiss-test/main/test-all.geojson';
+
+    fetch(geojsonUrl)
+        .then(response => {
+            if (!response.ok) throw new Error(`HTTP-Fehler: ${response.status}`);
+            return response.json();
+        })
+        .then(data => {
+            const gefundeneUeberkategorien = new Set();
+
+            L.geoJSON(data, {
+                pointToLayer: (f, latlng) => {
+                    const p = f.properties || {};
+                    const farbe = farbeFuerKategorie(p.kategorie);
+                    const key = ueberkategorie(p.kategorie);
+                    if (key) gefundeneUeberkategorien.add(key);
+
+                    return L.circleMarker(latlng, {
+                        radius: 7,
+                        color: "#333",
+                        weight: 1,
+                        fillColor: farbe,
+                        fillOpacity: 0.85
+                    });
+                },
+                onEachFeature: (f, l) => {
+                    const p = f.properties || {};
+                    const lat = l.getLatLng().lat;
+                    const lng = l.getLatLng().lng;
+
+                    let popup = `<b>${p.name || 'POI'}</b>`;
+
+                    if (p.image_url && p.image_url.trim() !== "") {
+                        popup += `<br><img src="${p.image_url}" width="250">`;
+                    }
+
+                    const items = [];
+
+                    if (p.kategorie && p.kategorie.toString().trim() !== "") {
+                        items.push(`🏷️ Bereich: ${labelFuerKategorie(p.kategorie)}`);
+                    }
+
+                    if (p.kanton && p.kanton.toString().trim() !== "") {
+                        items.push(`🇨🇭 Kanton: ${p.kanton}`);
+                    }
+
+                    if (p.jahrzehnt && p.jahrzehnt.toString().trim() !== "") {
+                        items.push(`🗓️ Jahrzehnt: ${p.jahrzehnt}`);
+                    }
+                    if (p.jahrhundert && p.jahrhundert.toString().trim() !== "") {
+                        items.push(`📜 Jahrhundert: ${p.jahrhundert}`);
+                    }
+
+                    // === Distanz: alt (distanz_kfr) UND neu (distanz: { KFR: "..." }) ===
+                    if (p.distanz && typeof p.distanz === 'object') {
+                        Object.entries(p.distanz).forEach(([k, v]) => {
+                            if (v && v !== "Keine Angabe") {
+                                items.push(`📏 Distanz ${k}: ${v}`);
+                            }
+                        });
+                    } else if (p.distanz_kfr && p.distanz_kfr !== "" && p.distanz_kfr !== "Keine Angabe") {
+                        items.push(`📏 Distanz zur KFR: ${p.distanz_kfr}`);
+                    }
+
+                    // === Erfasst (neu) ===
+                    if (p.erfasst && typeof p.erfasst === 'object') {
+                        const teile = [];
+                        if (p.erfasst.person) teile.push(p.erfasst.person);
+                        if (p.erfasst.team)   teile.push(`(Team ${p.erfasst.team})`);
+                        if (teile.length) items.push(`✍️ Erfasst: ${teile.join(' ')}`);
+                    }
+
+                    if (p.target_url && p.target_url.trim() !== "") {
+                        items.push(`<a href="${p.target_url}" target="_blank">🔗 HistoPics / HistoSwiss</a>`);
+                    }
+
+                    if (p.form_id && p.form_id.trim() !== "") {
+                        const formUrl = "https://forms.office.com/Pages/ResponsePage.aspx?id=oee1AwnLF0SeGsaGtECyxSYqCNTH3KVCvNcgoFLg2XZUMTZFRlJWRkVXQVZUOE9EVUs4MUc1NFZWUS4u&rf7c4e2f2d7d7438c8efbe1b915a05a0c=" + p.form_id;
+                        items.push(`<a href="${formUrl}" target="_blank">📝 Zur Formseingabe</a>`);
+                    }
+
+                    const googleMapsUrl = `https://www.google.com/maps?q=${lat},${lng}`;
+                    items.push(`<a href="${googleMapsUrl}" target="_blank">🗺️ In Google Maps öffnen</a>`);
+
+                    if (items.length > 0) {
+                        popup += "<br><ul><li>" + items.join("</li><li>") + "</li></ul>";
+                    }
+
+                    l.bindPopup(popup);
+                }
+            }).eachLayer(layer => markers.addLayer(layer));
+
+            map.addLayer(markers);
+
+            if (isNaN(startLat) || isNaN(startLng)) {
+                map.fitBounds(markers.getBounds());
+            }
+
+            if (gefundeneUeberkategorien.size > 0) {
+                const legendeDiv = L.DomUtil.create('div', 'histoswiss-legende');
+                let html = '<b>Bereiche (Test)</b><br>';
+                UEBERKATEGORIEN.forEach(u => {
+                    if (gefundeneUeberkategorien.has(u.key)) {
+                        html += `<span class="farbe" style="background:${u.farbe}"></span>${u.label}<br>`;
+                    }
+                });
+                legendeDiv.innerHTML = html;
+
+                const legendeCtrl = L.control({ position: 'bottomright' });
+                legendeCtrl.onAdd = () => legendeDiv;
+                legendeCtrl.addTo(map);
+            }
+        })
+        .catch(error => {
+            document.getElementById('map').innerHTML = `
+                <div style="color:red;padding:20px;font-family:sans-serif;">
+                    Fehler beim Laden der Karte:<br>
+                    ${error.message}
+                </div>
+            `;
+        });
+</script>
+
+</body>
+</html>
