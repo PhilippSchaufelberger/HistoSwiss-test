@@ -102,8 +102,16 @@ def load_geojson(path):
 
 def save_geojson(path, data):
     tmp = path + ".tmp"
+    features = data["features"]
     with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, separators=(",", ":"))
+        f.write('{"type":"FeatureCollection","features":[\n')
+        for i, feat in enumerate(features):
+            line = json.dumps(feat, ensure_ascii=False, separators=(",", ":"))
+            if i < len(features) - 1:
+                f.write(line + ",\n")
+            else:
+                f.write(line + "\n")
+        f.write("]}")
     os.replace(tmp, path)
 
 def main():
