@@ -113,7 +113,7 @@ def main():
         props = {
             "name":        build_name(entry.title, jahr, poi_id),
             "poi":         poi_id,
-            "distanz_kfr": f"{distanz:.2f} km".replace(".", ","),
+"distanz": { "KFR": f"{distanz:.2f} km".replace(".", ",") },
             "target_url":  entry.link,
             "form_id":     poi_id,
             "order":       max_order + 1,
