@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Liest neue Histopics-Beiträge aus dem WordPress-RSS-Feed,
-extrahiert lat/lng, Bild, Jahr, Kanton etc. und ergänzt test-all.geojson.
+extrahiert lat/lng, Bild, Jahr, Kanton, Autor etc. und ergänzt test-all.geojson.
 Idempotent: bestehende POIs werden anhand 'poi' erkannt und nicht dupliziert.
 """
 import json
@@ -42,12 +42,30 @@ def extract_jahr(html):
     return int(m.group(1)) if m else None
 
 def extract_kanton(html):
-    """Kanton aus Tag-Link /histopics/tag/CH-XX/."""
     m = re.search(r'/histopics/tag/CH-([A-Z]{2})/', html)
     return m.group(1) if m else None
 
+def extract_erfasst(html):
+    """Holt 'G. Modestin' und 'KFR' aus dem Erfasst-Absatz."""
+    soup = BeautifulSoup(html, "html.parser")
+    strong = soup.find("strong", string=lambda s: s and "Erfasst" in s)
+    if not strong:
+        return None
+    person_a = strong.find_next("a")
+    team_a   = person_a.find_next("a") if person_a else None
+    person   = person_a.get_text(strip=True) if person_a else None
+    team     = None
+    if team_a:
+        t = team_a.get_text(strip=True).strip("()")
+        team = t.replace("Team ", "").strip()
+    if not person and not team:
+        return None
+    result = {}
+    if person: result["person"] = person
+    if team:   result["team"]   = team
+    return result or None
+
 def build_name(entry_title, jahr, poi_id):
-    # "Histopics-3370: Gerhard Bühler ... Jura"  ->  "Gerhard Bühler ... Jura"
     base = entry_title.split(":", 1)[1].strip() if ":" in entry_title else entry_title
     if jahr:
         return f"{base}; {jahr} - {poi_id}"
@@ -105,22 +123,25 @@ def main():
             fehler += 1
             continue
 
-        jahr    = extract_jahr(html)
-        kanton  = extract_kanton(html)
-        bild    = extract_image_url(html)
-        distanz = haversine_km(KFR_LAT, KFR_LNG, lat, lng)
+        jahr     = extract_jahr(html)
+        kanton   = extract_kanton(html)
+        bild     = extract_image_url(html)
+        erfasst  = extract_erfasst(html)          # ← HIER wird der Autor geholt
+        distanz  = haversine_km(KFR_LAT, KFR_LNG, lat, lng)
 
+        # --- Properties zusammenbauen ---
         props = {
             "name":        build_name(entry.title, jahr, poi_id),
             "poi":         poi_id,
-"distanz": { "KFR": f"{distanz:.2f} km".replace(".", ",") },
+            "distanz":     { "KFR": f"{distanz:.2f} km".replace(".", ",") },
             "target_url":  entry.link,
             "form_id":     poi_id,
             "order":       max_order + 1,
             "kategorie":   KATEGORIE,
         }
-        if kanton: props["kanton"] = kanton
-        if bild:   props["image_url"] = bild
+        if kanton:  props["kanton"]    = kanton
+        if bild:    props["image_url"] = bild
+        if erfasst: props["erfasst"]   = erfasst   # ← HIER landet er im Feature
         if jahr:
             props["jahrzehnt"]   = jahrzehnt_from_jahr(jahr)
             props["jahrhundert"] = jahrhundert_from_jahr(jahr)
