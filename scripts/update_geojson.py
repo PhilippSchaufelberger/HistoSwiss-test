@@ -106,7 +106,9 @@ def main():
     print(f"  {len(feed.entries)} Einträge im Feed.")
 
     neu, skip, fehler = 0, 0, 0
-    for entry in feed.entries:
+    for i, entry in enumerate(feed.entries):
+        if i < 3:
+            print(f"DEBUG Titel: {entry.title!r}")
         m = re.search(r"Histopics-(\d+)", entry.title)
         if not m:
             continue
