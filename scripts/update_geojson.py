@@ -32,12 +32,20 @@ def extract_iframe_coords(html):
     m = re.search(r'\[histopics_iframe\s+lat="([\-\d.]+)"\s+lng="([\-\d.]+)"', html)
     return (float(m.group(1)), float(m.group(2))) if m else (None, None)
 
+def extract_poi_id(html):
+    """Sucht 'Histopics-XXXX' irgendwo im HTML (meist in Bild-URL)."""
+    m = re.search(r"Histopics-(\d+)", html)
+    return f"Histopics-{m.group(1).zfill(4)}" if m else None
+
 def extract_image_url(html):
     soup = BeautifulSoup(html, "html.parser")
     img = soup.select_one(".postie-attachments img") or soup.find("img")
     return img["src"] if img and img.get("src") else None
 
-def extract_jahr(html):
+def extract_jahr(title, html):
+    m = re.search(r";\s*(\d{4})", title)
+    if m:
+        return int(m.group(1))
     m = re.search(r'/histopics/search/(\d{4})/', html)
     return int(m.group(1)) if m else None
 
@@ -46,7 +54,6 @@ def extract_kanton(html):
     return m.group(1) if m else None
 
 def extract_erfasst(html):
-    """Holt 'G. Modestin' und 'KFR' aus dem Erfasst-Absatz."""
     soup = BeautifulSoup(html, "html.parser")
     strong = soup.find("strong", string=lambda s: s and "Erfasst" in s)
     if not strong:
@@ -65,11 +72,8 @@ def extract_erfasst(html):
     if team:   result["team"]   = team
     return result or None
 
-def build_name(entry_title, jahr, poi_id):
-    base = entry_title.split(":", 1)[1].strip() if ":" in entry_title else entry_title
-    if jahr:
-        return f"{base}; {jahr} - {poi_id}"
-    return f"{base} - {poi_id}"
+def build_name(title, poi_id):
+    return f"{title} - {poi_id}"
 
 def jahrzehnt_from_jahr(j):
     return f"{(j // 10) * 10}s" if j else None
@@ -96,7 +100,8 @@ def main():
     existing_pois = {f["properties"].get("poi") for f in features if f.get("properties")}
     max_order = max(
         (f["properties"].get("order", 0) for f in features
-         if isinstance(f.get("properties", {}).get("order"), int)),
+         if isinstance(f.get("properties", {}).get("order"), int)
+         and f["properties"].get("order") != 999999),
         default=0
     )
     print(f"  Höchste order: {max_order}")
@@ -106,18 +111,17 @@ def main():
     print(f"  {len(feed.entries)} Einträge im Feed.")
 
     neu, skip, fehler = 0, 0, 0
-    for i, entry in enumerate(feed.entries):
-        if i < 3:
-            print(f"DEBUG Titel: {entry.title!r}")
-        m = re.search(r"Histopics-(\d+)", entry.title)
-        if not m:
+    for entry in feed.entries:
+        html = entry.content[0].value if getattr(entry, "content", None) else entry.summary
+
+        poi_id = extract_poi_id(html)
+        if not poi_id:
+            print(f"  [???] kein POI-ID im HTML: {entry.title!r}")
+            fehler += 1
             continue
-        poi_id = f"Histopics-{m.group(1).zfill(4)}"
         if poi_id in existing_pois:
             skip += 1
             continue
-
-        html = entry.content[0].value if getattr(entry, "content", None) else entry.summary
 
         lat, lng = extract_iframe_coords(html)
         if lat is None:
@@ -125,15 +129,14 @@ def main():
             fehler += 1
             continue
 
-        jahr     = extract_jahr(html)
+        jahr     = extract_jahr(entry.title, html)
         kanton   = extract_kanton(html)
         bild     = extract_image_url(html)
-        erfasst  = extract_erfasst(html)          # ← HIER wird der Autor geholt
+        erfasst  = extract_erfasst(html)
         distanz  = haversine_km(KFR_LAT, KFR_LNG, lat, lng)
 
-        # --- Properties zusammenbauen ---
         props = {
-            "name":        build_name(entry.title, jahr, poi_id),
+            "name":        build_name(entry.title, poi_id),
             "poi":         poi_id,
             "distanz":     { "KFR": f"{distanz:.2f} km".replace(".", ",") },
             "target_url":  entry.link,
@@ -143,7 +146,7 @@ def main():
         }
         if kanton:  props["kanton"]    = kanton
         if bild:    props["image_url"] = bild
-        if erfasst: props["erfasst"]   = erfasst   # ← HIER landet er im Feature
+        if erfasst: props["erfasst"]   = erfasst
         if jahr:
             props["jahrzehnt"]   = jahrzehnt_from_jahr(jahr)
             props["jahrhundert"] = jahrhundert_from_jahr(jahr)
